@@ -4508,6 +4508,7 @@ Java_org_jpl7_fli_Prolog_attach_1pool_1engine(JNIEnv *env, jclass jProlog)
     for (i = 0; i < engines_allocated; i++)
     { int rc;
 
+      /* The engine has not yet been initialized */
       if ( !engines[i] )
         continue;
 
@@ -4531,6 +4532,7 @@ Java_org_jpl7_fli_Prolog_attach_1pool_1engine(JNIEnv *env, jclass jProlog)
       }
     }
 
+    /* Initialize new engines withih the max no in the pool */
     for (i = 0; i < engines_allocated; i++)
     { if ( !engines[i] )
       { if ( !(engines[i] = PL_create_engine(NULL)) )
