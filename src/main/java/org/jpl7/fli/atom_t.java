@@ -3,7 +3,7 @@ package org.jpl7.fli;
 /**
  * An atom_t is a specialised LongHolder which decrements its atom's reference
  * count when garbage-collected (finalized).
- * 
+ *
  * <hr>
  * Copyright (C) 1998 Fred Dushin
  * <p>
@@ -32,20 +32,23 @@ package org.jpl7.fli;
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
  * <hr>
- * 
+ *
  * @author Fred Dushin fadushin@syr.edu
  * @version $Revision$
  */
 public class atom_t extends LongHolder {
 	/**
 	 * The String representation of an atom_t is just the atom's name.
-	 * 
+	 *
 	 * @return atom's name
 	 */
+	@Override
 	public String toString() {
 		return Prolog.atom_chars(this);
 	}
 
+	@Override
+	@SuppressWarnings("deprecation")
 	protected void finalize() throws Throwable {
 		super.finalize();
 		Prolog.unregister_atom(this);

@@ -65,7 +65,7 @@ import org.jpl7.JPL;
  * @author Fred Dushin fadushin@syr.edu
  * @version $Revision$
  */
-@SuppressWarnings("UnusedReturnValue")
+
 public final class Prolog {
 	static {
 		JPL.loadNativeLibrary();
@@ -111,8 +111,8 @@ public final class Prolog {
 	public static final int CVT_ATOMIC = (CVT_NUMBER | CVT_ATOM | CVT_STRING);
 	public static final int CVT_ALL = (CVT_ATOMIC | CVT_LIST);
 	public static final int BUF_DISCARDABLE = 0x00000;
-	public static final int BUF_STACK       = 0x01000;
-	public static final int BUF_MALLOC      = 0x02000;
+	public static final int BUF_STACK = 0x01000;
+	public static final int BUF_MALLOC = 0x02000;
 
 	/* syntax flavours */
 	public static final int SYNTAX_TRADITIONAL = 202;
