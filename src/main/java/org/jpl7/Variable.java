@@ -61,13 +61,12 @@ public class Variable extends Term {
 	/**
 	 * the name of this Variable (may be changed as of April 2020)
 	 */
-	public  String name;
-
+	public String name;
 
 	/**
 	 * defined between Query.open() and Query.get2()
 	 */
-	protected transient term_t term_ = null;
+	public transient term_t term_ = null;
 
 	/**
 	 * Create a new don't tell Variable with new sequential name of the form "_261".
