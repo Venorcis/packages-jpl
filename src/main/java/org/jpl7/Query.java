@@ -286,7 +286,7 @@ public class Query implements Iterable<Map<String, Term>>, Iterator<Map<String, 
 	 * These variables are used and set across the hasMoreElements and
 	 * nextElement Enumeration interface implementation
 	 */
-	private boolean open = false;
+	protected boolean open = false;
 	// the following state variables are used and defined only if this query is
 	// open:
 	private engine_t engine = null; // handle of attached Prolog engine iff
@@ -504,7 +504,7 @@ public class Query implements Iterable<Map<String, Term>>, Iterator<Map<String, 
             throw new NoSuchElementException("Query has already yielded all solutions");
 	}
 
-	private Map<String, Term> getCurrentSolutionBindings() {
+	protected Map<String, Term> getCurrentSolutionBindings() {
 		if (!open) {
 			throw new JPLException("Query is not open, cannot retrive solution bindings.");
 		} else {
