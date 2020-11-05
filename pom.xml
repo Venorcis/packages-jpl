@@ -10,7 +10,7 @@
 	<!-- ######################### PROJECT INFO ######################### -->
 	<groupId>jpl</groupId>
 	<artifactId>jpl</artifactId>
-	<version>8.3.9</version>
+	<version>8.3.11</version>
 
 	<name>jpl</name>
 	<description>A Java Interface to Prolog</description>
@@ -59,7 +59,7 @@
 		<dependency>
 			<groupId>junit</groupId>
 			<artifactId>junit</artifactId>
-			<version>4.13</version>
+			<version>4.13.1</version>
 			<scope>test</scope>
 		</dependency>
 
@@ -70,8 +70,6 @@
 			<version>${slf4jVersion}</version>
 		</dependency>
 	</dependencies>
-
-	<!-- ######################### REPOSITORIES ######################### -->
 
 
 	<!-- ######################### BUILD PIPELINE ######################### -->
