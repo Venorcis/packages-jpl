@@ -48,8 +48,9 @@
         jpl_class_to_classname/2,
         jpl_class_to_type/2,
         jpl_classname_to_class/2,
-        jpl_classname_to_type/2,
+        jpl_classname_to_type/2, % name does not reflect that it deals with entity names
         jpl_datum_to_type/2,
+        jpl_entityname_to_type/2, % new alias for jpl_classname_to_type/2
         jpl_false/1,
         jpl_is_class/1,
         jpl_is_false/1,
@@ -67,7 +68,8 @@
         jpl_ref_to_type/2,
         jpl_true/1,
         jpl_type_to_class/2,
-        jpl_type_to_classname/2,
+        jpl_type_to_classname/2, % name does not reflect that it deals with entity names
+        jpl_type_to_entityname/2, % new alias for jpl_type_to_classname/2
         jpl_void/1,
         jpl_array_to_length/2,
         jpl_array_to_list/2,
@@ -81,7 +83,7 @@
         jpl_array_to_terms/2,
         jpl_map_element/2,
         jpl_set_element/2
-    ]).
+   ]).
 :- autoload(library(apply),[maplist/2]).
 :- autoload(library(debug),[debugging/1,debug/3]).
 :- autoload(library(lists),
@@ -122,17 +124,18 @@ The library(jpl) provides a bidirectional interface to a Java Virtual Machine.
 % integer N, then V is a new array of that type, with N elements, each
 % initialised to Java's appropriate default value for the type.
 %
-% If V is {Term} then we attempt to convert a new org.jpl7.Term instance to
+% If V is literally =|{Term}|= then we attempt to convert a
+% =|new org.jpl7.Term|= instance to
 % a corresponding term; this is of  little   obvious  use here, but is
 % consistent with jpl_call/4 and jpl_get/3.
 
 jpl_new(X, Params, V) :-
     (   var(X)
     ->  throwme(jpl_new,x_is_var)
-    ;   jpl_is_type(X)                  % NB only class(_,_) or array(_)
+    ;   jpl_is_type(X)                  % NB Should check for "instantiable type"? Also accepts "double" for example.
     ->  Type = X
-    ;   atom(X)                 % e.g. 'java.lang.String', '[L', 'boolean'
-    ->  (   jpl_classname_to_type(X, Type)
+    ;   atom(X)                         % an atom not captured by jpl_is_type/1 e.g. 'java.lang.String', '[L', even "void"
+    ->  (   jpl_entityname_to_type(X, Type)
         ->  true
         ;   throwme(jpl_new,x_not_classname(X))
         )
@@ -178,10 +181,9 @@ jpl_new_1(class(Ps,Cs), Params, Vx) :-
         Z3s
     ),
     (   Z3s == []               % no constructors which require the given qty of parameters?
-    ->  jpl_type_to_classname(Tx, Cn),
-        (   jpl_call(Cx, isInterface, [], @(true))
-        ->  throwme(jpl_new_class,class_is_interface(Cn))
-        ;   throwme(jpl_new_class,class_without_constructor(Cn/A))
+    ->  (   jpl_call(Cx, isInterface, [], @(true))
+        ->  throwme(jpl_new_class,class_is_interface(Tx))
+        ;   throwme(jpl_new_class,class_without_constructor(Tx,A))
         )
     ;   (   catch(
                 jpl_datums_to_types(Params, Taps),  % infer actual parameter types
@@ -214,9 +216,7 @@ jpl_new_1(class(Ps,Cs), Params, Vx) :-
     catch(
         jNewObject(Cx, MID, Tfps, Params, Vx),
         error(java_exception(_), 'java.lang.InstantiationException'),
-        (   jpl_type_to_classname(Tx, Cn),
-            throwme(jpl_new_class,class_is_abstract(Cn)) % Rethrow
-        )
+        throwme(jpl_new_class,class_is_abstract(Tx)) % Rethrow
     ),
     jpl_cache_type_of_ref(Tx, Vx).          % since we know it
 
@@ -301,7 +301,7 @@ jpl_new_array(class(Ps,Cs), Len, A) :-
 % This resolution mimics the corresponding static resolution performed by Java compilers.
 %
 % Finally, an attempt will be made to unify Result with the method's returned value,
-% or with =|@(void)|= if it has none.
+% or with =|@(void)|= (the compound term with name =|@|= and argument =|void|=) if it has none.
 
 jpl_call(X, Mspec, Params, R) :-
     (   jpl_object_to_type(X, Type)         % the usual case (goal fails safely if X is var or rubbish)
@@ -310,7 +310,7 @@ jpl_call(X, Mspec, Params, R) :-
     ;   var(X)
     ->  throwme(jpl_call,arg1_is_var)
     ;   atom(X)
-    ->  (   jpl_classname_to_type(X, Type)     % does this attempt to load the class?
+    ->  (   jpl_entityname_to_type(X, Type)     % does this attempt to load the class?
         ->  (   jpl_type_to_class(Type, ClassObj)
             ->  Kind = static
             ;   throwme(jpl_call,no_such_class(X))
@@ -529,14 +529,13 @@ jpl_get(X, Fspec, V) :-
     ->  Type = X,
         (   jpl_type_to_class(Type, ClassObj)
         ->  jpl_get_static(Type, ClassObj, Fspec, Vx)
-        ;   jpl_type_to_classname(Type, Classname),
-            throwme(jpl_get,named_class_not_found(Classname))
+        ;   throwme(jpl_get,named_class_not_found(Type))
         )
     ;   atom(X)
-    ->  (   jpl_classname_to_type(X, Type)     % does this attempt to load the class?
+    ->  (   jpl_entityname_to_type(X, Type)     % does this attempt to load the class? (NO!)
         ->  (   jpl_type_to_class(Type, ClassObj)
             ->  jpl_get_static(Type, ClassObj, Fspec, Vx)
-            ;   throwme(jpl_get,named_class_not_found(X))
+            ;   throwme(jpl_get,named_class_not_found(Type))
             )
         ;   throwme(jpl_get,arg1_is_bad(X))
         )
@@ -816,7 +815,7 @@ jpl_set(X, Fspec, V) :-
     ;   var(X)
     ->  throwme(jpl_set,arg1_is_var)
     ;   (   atom(X)
-        ->  (   jpl_classname_to_type(X, Type)          % it's a classname or descriptor...
+        ->  (   jpl_entityname_to_type(X, Type)          % it's a classname or descriptor...
             ->  true
             ;   throwme(jpl_set,classname_does_not_resolve(X))
             )
@@ -827,8 +826,7 @@ jpl_set(X, Fspec, V) :-
         ),
         (   jpl_type_to_class(Type, ClassObj)      % ...whose Class object is available
         ->  true
-        ;   jpl_type_to_classname(Type, Classname),
-            throwme(jpl_set,class_not_found(Classname))
+        ;   throwme(jpl_set,named_class_not_found(Type))
         )
     ->  catch(
             jpl_set_static(Type, ClassObj, Fspec, V),
@@ -874,8 +872,7 @@ jpl_set_instance(class(_,_), Type, Obj, Fname, V) :-    % a non-array object
                     jpl_set_static_field(Tf, ClassObj, FID, V)
                 ;   jpl_set_instance_field(Tf, Obj, FID, V)         % oughta be jpl_set_instance_field?
                 )
-            ;   jpl_type_to_nicename(Tf, NNf),
-                throwme(jpl_set_instance_class,incompatible_value(NNf,V))
+            ;   throwme(jpl_set_instance_class,incompatible_value(Tf,V))
             )
         ;   throwme(jpl_set_instance_class,arg3_is_bad(V))
         )
@@ -963,8 +960,7 @@ jpl_set_static(Type, ClassObj, Fname, V) :-
         ;   jpl_datum_to_type(V, Tv)
         ->  (   jpl_type_fits_type(Tv, Tf)
             ->  jpl_set_static_field(Tf, ClassObj, FID, V)
-            ;   jpl_type_to_nicename(Tf, NNf),
-                throwme(jpl_set_static,value_not_assignable(NNf,V))
+            ;   throwme(jpl_set_static,value_not_assignable(Tf,V))
             )
         ;   throwme(jpl_set_static,arg3_is_bad(field_value,V))
         )
@@ -1136,24 +1132,87 @@ jpl_set_default_jvm_opts(Opts) :-
 jpl_get_actual_jvm_opts(Opts) :-
     jni_get_actual_jvm_opts(Opts).
 
+% ===========================================================================
+% Caching
+% ===========================================================================
+
+% In principle the predicates subject to assert/1 must be declared with the
+% dynamic/1 directive. However, they are automatically declared as "dynamic"
+% if they appear in an assert/1 call first. Anyway, we declare then dynamic
+% right here!
+
+:- dynamic jpl_field_spec_cache/6.      % document this...
+:- dynamic jpl_field_spec_is_cached/1.  % document this...
+:- dynamic jpl_method_spec_cache/8.
+:- dynamic jpl_method_spec_is_cached/1.
+:- dynamic jpl_iref_type_cache/2.
+
+%! jpl_classname_type_cache( -Classname:className, -Type:type)
+%
+% Classname is the atomic name of Type.
+%
+% NB may denote a class which cannot be found.
+
+:- dynamic jpl_classname_type_cache/2.
+
+%! jpl_class_tag_type_cache(-Class:jref, -Type:jpl_type)
+%
+% `Class` is a reference to an instance of `java.lang.Class`
+% which denotes `Type`.
+%
+% We index on `Class` (a jref) so as to keep these objects around
+% even after an atom garbage collection (if needed once, they are likely
+% to be needed again)
+%
+% (Is it possble to have different Ref for the same ClassType,
+%  which happens once several ClassLoaders become involved?) (Most likely)
+
+:- dynamic jpl_class_tag_type_cache/2.
+
+%! jpl_assert(+Fact:term)
+%
+% Assert a fact listed in jpl_assert_policy/2 with "yes" into the Prolog
+% database.
+%
+% From the SWI-Prolog manual:
+%
+% > "In SWI-Prolog, querying dynamic predicates has the same performance as
+% > static ones. The manipulation predicates are fast."
+%
+% And:
+%
+% > "By default, a predicate declared dynamic (see dynamic/1) is shared by
+% > all threads. Each thread may assert, retract and run the dynamic
+% > predicate. Synchronisation inside Prolog guarantees the consistency of
+% > the predicate. Updates are logical: visible clauses are not affected
+% > by assert/retract after a query started on the predicate. In many
+% > cases primitives from section 10.4 should be used to ensure that
+% > application invariants on the predicate are maintained.
+%
+% @see https://eu.swi-prolog.org/pldoc/man?section=db
+% @see https://eu.swi-prolog.org/pldoc/man?section=threadlocal
 
 jpl_assert(Fact) :-
     (   jpl_assert_policy(Fact, yes)
-    ->  assert(Fact)
+    ->  assertz(Fact)
     ;   true
     ).
 
+% ---
+% policies
+% ---
 
 jpl_assert_policy(jpl_field_spec_cache(_,_,_,_,_,_), yes).
+jpl_assert_policy(jpl_field_spec_is_cached(_), YN) :-
+   jpl_assert_policy(jpl_field_spec_cache(_,_,_,_,_,_), YN).
+
 jpl_assert_policy(jpl_method_spec_cache(_,_,_,_,_,_,_,_), yes).
+jpl_assert_policy(jpl_method_spec_is_cached(_), YN) :-
+   jpl_assert_policy(jpl_method_spec_cache(_,_,_,_,_,_,_,_), YN).
+
 jpl_assert_policy(jpl_class_tag_type_cache(_,_), yes).
 jpl_assert_policy(jpl_classname_type_cache(_,_), yes).
 jpl_assert_policy(jpl_iref_type_cache(_,_), no).   % must correspond to JPL_CACHE_TYPE_OF_REF in jpl.c
-jpl_assert_policy(jpl_field_spec_is_cached(_), YN) :-
-    jpl_assert_policy(jpl_field_spec_cache(_,_,_,_,_,_), YN).
-jpl_assert_policy(jpl_method_spec_is_cached(_), YN) :-
-    jpl_assert_policy(jpl_method_spec_cache(_,_,_,_,_,_,_,_), YN).
-
 
 %! jpl_tidy_iref_type_cache(+Iref) is det.
 %
@@ -1303,201 +1362,6 @@ jpl_c_lib_path(Path) :-
 
 jpl_java_lib_path(Path) :-
     jpl_call('org.jpl7.JPL', jarPath, [], Path).
-
-
-% jpl_type_alfa(0'$) -->        % presumably not allowed
-%   "$".                        % given the "inner class" syntax?
-
-jpl_type_alfa(0'_) -->
-    "_",
-    !.
-jpl_type_alfa(C) -->
-    [C], { C>=0'a, C=<0'z },
-    !.
-jpl_type_alfa(C) -->
-    [C], { C>=0'A, C=<0'Z }.
-
-
-jpl_type_alfa_num(C) -->
-    jpl_type_alfa(C),
-    !.
-jpl_type_alfa_num(C) -->
-    [C], { C>=0'0, C=<0'9 }.
-
-
-jpl_type_array_classname(array(T)) -->
-    "[", jpl_type_classname_2(T).
-
-
-jpl_type_array_descriptor(array(T)) -->
-    "[", jpl_type_descriptor_1(T).
-
-
-jpl_type_bare_class_descriptor(class(Ps,Cs)) -->
-    jpl_type_slashed_package_parts(Ps), jpl_type_class_parts(Cs).
-
-
-jpl_type_bare_classname(class(Ps,Cs)) -->
-    jpl_type_dotted_package_parts(Ps), jpl_type_class_parts(Cs).
-
-
-jpl_type_class_descriptor(class(Ps,Cs)) -->
-    "L", jpl_type_bare_class_descriptor(class(Ps,Cs)), ";".
-
-
-jpl_type_class_part(N) -->
-    jpl_type_id(N).
-
-
-jpl_type_class_parts([C|Cs]) -->
-    jpl_type_class_part(C), jpl_type_inner_class_parts(Cs).
-
-
-jpl_type_classname_1(T) -->
-    jpl_type_bare_classname(T),
-    !.
-jpl_type_classname_1(T) -->
-    jpl_type_array_classname(T),
-    !.
-jpl_type_classname_1(T) -->
-    jpl_type_primitive(T).
-
-
-jpl_type_classname_2(T) -->
-    jpl_type_delimited_classname(T).
-jpl_type_classname_2(T) -->
-    jpl_type_array_classname(T).
-jpl_type_classname_2(T) -->
-    jpl_type_primitive(T).
-
-
-
-jpl_type_delimited_classname(Class) -->
-    "L", jpl_type_bare_classname(Class), ";".
-
-
-
-jpl_type_descriptor_1(T) -->
-    jpl_type_primitive(T),
-    !.
-jpl_type_descriptor_1(T) -->
-    jpl_type_class_descriptor(T),
-    !.
-jpl_type_descriptor_1(T) -->
-    jpl_type_array_descriptor(T),
-    !.
-jpl_type_descriptor_1(T) -->
-    jpl_type_method_descriptor(T).
-
-
-
-jpl_type_dotted_package_parts([P|Ps]) -->
-    jpl_type_package_part(P), ".", !, jpl_type_dotted_package_parts(Ps).
-jpl_type_dotted_package_parts([]) -->
-    [].
-
-
-
-jpl_type_findclassname(T) -->
-    jpl_type_bare_class_descriptor(T).
-jpl_type_findclassname(T) -->
-    jpl_type_array_descriptor(T).
-
-
-
-jpl_type_id(A) -->
-    { nonvar(A) -> atom_codes(A,[C|Cs]) ; true },
-    jpl_type_alfa(C), jpl_type_id_rest(Cs),
-    { atom_codes(A, [C|Cs]) }.
-
-
-
-jpl_type_id_rest([C|Cs]) -->
-    jpl_type_alfa_num(C), !, jpl_type_id_rest(Cs).
-jpl_type_id_rest([]) -->
-    [].
-
-
-
-jpl_type_id_v2(A) -->                   % inner class name parts (empirically)
-    { nonvar(A) -> atom_codes(A,Cs) ; true },
-    jpl_type_id_rest(Cs),
-    { atom_codes(A, Cs) }.
-
-
-
-jpl_type_inner_class_part(N) -->
-    jpl_type_id_v2(N).
-
-
-
-jpl_type_inner_class_parts([C|Cs]) -->
-    "$", jpl_type_inner_class_part(C), !, jpl_type_inner_class_parts(Cs).
-jpl_type_inner_class_parts([]) -->
-    [].
-
-
-
-jpl_type_method_descriptor(method(Ts,T)) -->
-    "(", jpl_type_method_descriptor_args(Ts), ")", jpl_type_method_descriptor_return(T).
-
-
-
-jpl_type_method_descriptor_args([T|Ts]) -->
-    jpl_type_descriptor_1(T), !, jpl_type_method_descriptor_args(Ts).
-jpl_type_method_descriptor_args([]) -->
-    [].
-
-
-
-jpl_type_method_descriptor_return(T) -->
-    jpl_type_void(T).
-jpl_type_method_descriptor_return(T) -->
-    jpl_type_descriptor_1(T).
-
-
-
-jpl_type_package_part(N) -->
-    jpl_type_id(N).
-
-
-
-jpl_type_primitive(boolean) -->
-    "Z",
-    !.
-jpl_type_primitive(byte) -->
-    "B",
-    !.
-jpl_type_primitive(char) -->
-    "C",
-    !.
-jpl_type_primitive(short) -->
-    "S",
-    !.
-jpl_type_primitive(int) -->
-    "I",
-    !.
-jpl_type_primitive(long) -->
-    "J",
-    !.
-jpl_type_primitive(float) -->
-    "F",
-    !.
-jpl_type_primitive(double) -->
-    "D".
-
-
-
-jpl_type_slashed_package_parts([P|Ps]) -->
-    jpl_type_package_part(P), "/", !, jpl_type_slashed_package_parts(Ps).
-jpl_type_slashed_package_parts([]) -->
-    [].
-
-
-
-jpl_type_void(void) -->
-    "V".
-
 
 
 %! jCallBooleanMethod(+Obj:jref, +MethodID:methodId, +Types:list(type), +Params:list(datum), -Rbool:boolean)
@@ -1705,8 +1569,8 @@ jGetDoubleField(Obj, FieldID, Rdouble) :-
 %! jGetFieldID(+Class:jref, +Name:fieldName, +Type:type, -FieldID:fieldId)
 
 jGetFieldID(Class, Name, Type, FieldID) :-
-    jpl_type_to_descriptor(Type, TD),
-    jni_func(94, Class, Name, TD, FieldID).
+    jpl_type_to_java_field_descriptor(Type, FD),
+    jni_func(94, Class, Name, FD, FieldID).
 
 
 %! jGetFloatArrayRegion(+Array:jref, +Start:int, +Len:int, +Buf:float_buf)
@@ -1748,8 +1612,8 @@ jGetLongField(Obj, FieldID, Rlong) :-
 %! jGetMethodID(+Class:jref, +Name:atom, +Type:type, -MethodID:methodId)
 
 jGetMethodID(Class, Name, Type, MethodID) :-
-    jpl_type_to_descriptor(Type, TD),
-    jni_func(33, Class, Name, TD, MethodID).
+    jpl_type_to_java_method_descriptor(Type, MD),
+    jni_func(33, Class, Name, MD, MethodID).
 
 
 %! jGetObjectArrayElement(+Array:jref, +Index:int, -Obj:jref)
@@ -1809,7 +1673,7 @@ jGetStaticDoubleField(Class, FieldID, Rdouble) :-
 %! jGetStaticFieldID(+Class:jref, +Name:fieldName, +Type:type, -FieldID:fieldId)
 
 jGetStaticFieldID(Class, Name, Type, FieldID) :-
-    jpl_type_to_descriptor(Type, TD),               % cache this?
+    jpl_type_to_java_field_descriptor(Type, TD),               % cache this?
     jni_func(144, Class, Name, TD, FieldID).
 
 
@@ -1834,7 +1698,7 @@ jGetStaticLongField(Class, FieldID, Rlong) :-
 %! jGetStaticMethodID(+Class:jref, +Name:methodName, +Type:type, -MethodID:methodId)
 
 jGetStaticMethodID(Class, Name, Type, MethodID) :-
-    jpl_type_to_descriptor(Type, TD),
+    jpl_type_to_java_method_descriptor(Type, TD),
     jni_func(113, Class, Name, TD, MethodID).
 
 
@@ -2155,7 +2019,7 @@ jni_type_to_xput_code(jvalue,       15).    % JNI_XPUT_JVALUE
 % NB might this be done more efficiently in foreign code? or in Java?
 
 jpl_class_to_constructor_array(Cx, Ma) :-
-    jpl_classname_to_class('java.lang.Class', CC),      % cacheable?
+    jpl_entityname_to_class('java.lang.Class', CC),      % cacheable?
     jGetMethodID( CC, getConstructors, method([],array(class([java,lang,reflect],['Constructor']))), MID), % cacheable?
     jCallObjectMethod(Cx, MID, [], [], Ma).
 
@@ -2170,7 +2034,7 @@ jpl_class_to_constructors(Cx, Ms) :-
 %! jpl_class_to_field_array(+Class:jref, -FieldArray:jref)
 
 jpl_class_to_field_array(Cx, Fa) :-
-    jpl_classname_to_class('java.lang.Class', CC),      % cacheable?
+    jpl_entityname_to_class('java.lang.Class', CC),      % cacheable?
     jGetMethodID(CC, getFields, method([],array(class([java,lang,reflect],['Field']))), MID),  % cacheable?
     jCallObjectMethod(Cx, MID, [], [], Fa).
 
@@ -2189,7 +2053,7 @@ jpl_class_to_fields(C, Fs) :-
 % NB migrate into foreign code for efficiency?
 
 jpl_class_to_method_array(Cx, Ma) :-
-    jpl_classname_to_class('java.lang.Class', CC),      % cacheable?
+    jpl_entityname_to_class('java.lang.Class', CC),      % cacheable?
     jGetMethodID(CC, getMethods, method([],array(class([java,lang,reflect],['Method']))), MID),  % cacheable?
     jCallObjectMethod(Cx, MID, [], [], Ma).
 
@@ -2210,7 +2074,7 @@ jpl_class_to_methods(Cx, Ms) :-
 % NB migrate into foreign code for efficiency?
 
 jpl_constructor_to_modifiers(X, Ms) :-
-    jpl_classname_to_class('java.lang.reflect.Constructor', Cx),   % cached?
+    jpl_entityname_to_class('java.lang.reflect.Constructor', Cx),   % cached?
     jpl_method_to_modifiers_1(X, Cx, Ms).
 
 
@@ -2227,7 +2091,7 @@ jpl_constructor_to_name(_X, '<init>').
 % NB migrate to foreign code for efficiency?
 
 jpl_constructor_to_parameter_types(X, Tfps) :-
-    jpl_classname_to_class('java.lang.reflect.Constructor', Cx),   % cached?
+    jpl_entityname_to_class('java.lang.reflect.Constructor', Cx),   % cached?
     jpl_method_to_parameter_types_1(X, Cx, Tfps).
 
 
@@ -2273,30 +2137,25 @@ jpl_field_spec_1(C, Tci, Fs) :-
     ).
 
 
-:- dynamic jpl_field_spec_cache/6.      % document this...
-
-
-:- dynamic jpl_field_spec_is_cached/1.  % document this...
-
 
 %! jpl_field_to_modifiers(+Field:jref, -Modifiers:ordset(modifier))
 
 jpl_field_to_modifiers(F, Ms) :-
-    jpl_classname_to_class('java.lang.reflect.Field', Cf),
+    jpl_entityname_to_class('java.lang.reflect.Field', Cf),
     jpl_method_to_modifiers_1(F, Cf, Ms).
 
 
 %! jpl_field_to_name(+Field:jref, -Name:atom)
 
 jpl_field_to_name(F, N) :-
-    jpl_classname_to_class('java.lang.reflect.Field', Cf),
+    jpl_entityname_to_class('java.lang.reflect.Field', Cf),
     jpl_member_to_name_1(F, Cf, N).
 
 
 %! jpl_field_to_type(+Field:jref, -Type:type)
 
 jpl_field_to_type(F, Tf) :-
-    jpl_classname_to_class('java.lang.reflect.Field', Cf),
+    jpl_entityname_to_class('java.lang.reflect.Field', Cf),
     jGetMethodID(Cf, getType, method([],class([java,lang],['Class'])), MID),
     jCallObjectMethod(F, MID, [], [], Cr),
     jpl_class_to_type(Cr, Tf).
@@ -2352,16 +2211,11 @@ jpl_method_spec_1(C, Tci, Xs, Ms) :-
     ).
 
 
-:- dynamic jpl_method_spec_cache/8.
-
-
-:- dynamic jpl_method_spec_is_cached/1.
-
 
 %! jpl_method_to_modifiers(+Method:jref, -ModifierSet:ordset(modifier))
 
 jpl_method_to_modifiers(M, Ms) :-
-    jpl_classname_to_class('java.lang.reflect.Method', Cm),
+    jpl_entityname_to_class('java.lang.reflect.Method', Cm),
     jpl_method_to_modifiers_1(M, Cm, Ms).
 
 
@@ -2376,7 +2230,7 @@ jpl_method_to_modifiers_1(XM, Cxm, Ms) :-
 %! jpl_method_to_name(+Method:jref, -Name:atom)
 
 jpl_method_to_name(M, N) :-
-    jpl_classname_to_class('java.lang.reflect.Method', CM),
+    jpl_entityname_to_class('java.lang.reflect.Method', CM),
     jpl_member_to_name_1(M, CM, N).
 
 
@@ -2390,7 +2244,7 @@ jpl_member_to_name_1(M, CM, N) :-
 %! jpl_method_to_parameter_types(+Method:jref, -Types:list(type))
 
 jpl_method_to_parameter_types(M, Tfps) :-
-    jpl_classname_to_class('java.lang.reflect.Method', Cm),
+    jpl_entityname_to_class('java.lang.reflect.Method', Cm),
     jpl_method_to_parameter_types_1(M, Cm, Tfps).
 
 
@@ -2408,7 +2262,7 @@ jpl_method_to_parameter_types_1(XM, Cxm, Tfps) :-
 %! jpl_method_to_return_type(+Method:jref, -Type:type)
 
 jpl_method_to_return_type(M, Tr) :-
-    jpl_classname_to_class('java.lang.reflect.Method', Cm),
+    jpl_entityname_to_class('java.lang.reflect.Method', Cm),
     jGetMethodID(Cm, getReturnType, method([],class([java,lang],['Class'])), MID),
     jCallObjectMethod(M, MID, [], [], Cr),
     jpl_class_to_type(Cr, Tr).
@@ -2474,17 +2328,6 @@ jpl_cache_type_of_ref(T, Ref) :-
     ).
 
 
-%! jpl_class_tag_type_cache(-Ref:jref, -ClassType:type)
-%
-% Ref is a reference to a JVM instance of java.lang.Class which denotes ClassType.
-%
-% We index on Ref so as to keep these objects around
-% even after an atom garbage collection
-% (if needed once, they are likely to be needed again)
-
-:- dynamic jpl_class_tag_type_cache/2.
-
-
 %! jpl_class_to_ancestor_classes(+Class:jref, -AncestorClasses:list(jref))
 %
 % AncestorClasses will be a list of (JPL references to) instances of java.lang.Class
@@ -2501,7 +2344,7 @@ jpl_class_to_ancestor_classes(C, Cas) :-
     ).
 
 
-%! jpl_class_to_classname(+Class:jref, -ClassName:dottedName)
+%! jpl_class_to_classname(+Class:jref, -ClassName:entityName)
 %
 % Class is a reference to a class object.
 %
@@ -2511,37 +2354,30 @@ jpl_class_to_ancestor_classes(C, Cas) :-
 % NB not used outside jni_junk and jpl_test (is this (still) true?)
 %
 % NB oughta use the available caches (but their indexing doesn't suit)
+%
+% TODO This shouldn't exist as we have jpl_class_to_entityname/2 ???
+%
+% The implementation actually just calls `Class.getName()` to get
+% the entity name (dotted name)
 
 jpl_class_to_classname(C, CN) :-
     jpl_call(C, getName, [], CN).
 
 
-%! jpl_class_to_raw_classname(+Class:jref, -ClassName:rawName)
+%! jpl_class_to_entityname(+Class:jref, -EntityName:atom)
 %
-% The "raw classname" is the "name of the entity" as returned by
-% Class.getName()
+% The `Class` is a reference to a class object.
+% The `EntityName` is the string as returned by `Class.getName()`.
 %
-% For example: "java.lang.String", "byte", "[Ljava.lang.Object;", "[[[[[[[I"
+% This predicate actually calls `Class.getName()` on the class corresponding to `Class`.
 %
-% @see https://docs.oracle.com/javase/7/docs/api/java/lang/Class.html#getName()
-%      https://docs.oracle.com/en/java/javase/14/docs/api/java.base/java/lang/Class.html#getName()
+% @see https://docs.oracle.com/en/java/javase/14/docs/api/java.base/java/lang/Class.html#getName()
 
-jpl_class_to_raw_classname(Cobj, CN) :-
-    jpl_classname_to_class('java.lang.Class', CC),      % cached?
-    jGetMethodID(CC, getName, method([],class([java,lang],['String'])), MIDgetName),
-    jCallObjectMethod(Cobj, MIDgetName, [], [], S),
-    S = CN.
-
-
-%! jpl_class_to_raw_classname_chars(+Class:jref, -ClassnameChars:codes)
-%
-% Class is a reference to a class object
-%
-% ClassnameChars is a codes representation of its dotted name
-
-jpl_class_to_raw_classname_chars(Cobj, CsCN) :-
-    jpl_class_to_raw_classname(Cobj, CN),
-    atom_codes(CN, CsCN).
+jpl_class_to_entityname(Class, EntityName) :-
+    jpl_entityname_to_class('java.lang.Class', CC),      % cached?
+    jGetMethodID(CC, getName, method([],class([java,lang],['String'])), MIDgetName), % does this ever change?
+    jCallObjectMethod(Class, MIDgetName, [], [], S),
+    S = EntityName.
 
 
 jpl_class_to_super_class(C, Cx) :-
@@ -2550,23 +2386,26 @@ jpl_class_to_super_class(C, Cx) :-
     jpl_cache_type_of_ref(class([java,lang],['Class']), Cx).
 
 
-%! jpl_class_to_type(+ClassObject:jref, -Type:type)
+%! jpl_class_to_type(+Class:jref, -Type:jpl_type)
 %
-% ClassObject is a reference to a class object of Type.
+% The `Class` is a reference to a (Java Universe) instance of `java.lang.Class`.
+% The `Type` is the (Prolog Universe) JPL type term denoting the same type as does
+% the instance of `Class`.
 %
 % NB should ensure that, if not found in cache, then cache is updated.
 %
 % Intriguingly, getParameterTypes returns class objects (undocumented AFAIK) with names
 % 'boolean', 'byte' etc. and even 'void' (?!)
 
-jpl_class_to_type(Ref, Type) :-
-    (   jpl_class_tag_type_cache(Ref, Tx)
+jpl_class_to_type(Class, Type) :-
+    assertion(blob(Class,jref)),               % "Class" cannot be uninstantiated and must be blob jref
+    (   jpl_class_tag_type_cache(Class, Tx)    % found in cache!
     ->  true
-    ;   jpl_class_to_raw_classname_chars(Ref, Cs),   % uncached
-        jpl_classname_chars_to_type(Cs, Tr),
-        jpl_type_to_canonical_type(Tr, Tx),             % map e.g. class([],[byte]) -> byte
-        jpl_assert(jpl_class_tag_type_cache(Ref,Tx))
-    ->  true    % the elseif goal should be determinate, but just in case...
+    ;   jpl_class_to_entityname(Class, EN),   % uncached ??
+        jpl_entityname_to_type(EN, Tr),
+        jpl_type_to_canonical_type(Tr, Tx),             % map e.g. class([],[byte]) -> byte (TODO: Looks like a dirty fix; I would say this is not needed now)
+        jpl_assert(jpl_class_tag_type_cache(Class,Tx))
+    ->  true    % the elseif goal should be determinate, but just in case... TODO: Replace by a once
     ),
     Type = Tx.
 
@@ -2577,52 +2416,113 @@ jpl_classes_to_types([C|Cs], [T|Ts]) :-
     jpl_classes_to_types(Cs, Ts).
 
 
-jpl_classname_chars_to_type(Cs, Type) :-
-    (   phrase(jpl_type_classname_1(Type), Cs)
-    ->  true
-    ).
-
-
-%! jpl_classname_to_class(+ClassName:className, -Class:jref)
+%! jpl_entityname_to_class(+EntityName:atom, -Class:jref)
 %
-% ClassName unambiguously represents a class, e.g. =|'java.lang.String'|=
+% `EntityName` is the entity name to be mapped to a class reference.
 %
-% Class is a (canonical) reference to the corresponding class object.
+% `Class` is a (canonical) reference to the corresponding class object.
 %
 % NB uses caches where the class is already encountered.
 
-jpl_classname_to_class(N, C) :-
-    jpl_classname_to_type(N, T),    % cached
-    jpl_type_to_class(T, C).        % cached
+jpl_entityname_to_class(EntityName, Class) :-
+    jpl_entityname_to_type(EntityName, T),    % cached
+    jpl_type_to_class(T, Class).               % cached
 
+%! jpl_classname_to_class(+EntityName:atom, -Class:jref)
+%
+% `EntityName` is the entity name to be mapped to a class reference.
+%
+% `Class` is a (canonical) reference to the corresponding class object.
+%
+% NB uses caches where the class has already been mapped once before.
 
-%! jpl_classname_to_type(+Classname:className, -Type:type)
-%
-% Classname is any of: a source-syntax (dotted) class name, e.g. 'java.util.Date', '[java.util.Date' or '[L'
-%
-% Type is its corresponding JPL type structure, e.g. =|class([java,util],['Date'])|=, =|array(class([java,util],['Date']))|=, =|array(long)|=
-%
-% NB by "classname" do I mean "typename"?
-%
-% NB should this throw an exception for unbound CN? is this public API?
+jpl_classname_to_class(EntityName, Class) :-
+    jpl_entityname_to_class(EntityName, Class). % wrapper for historical usage/export
 
-jpl_classname_to_type(CN, T) :-
-    (   jpl_classname_type_cache(CN, Tx)
-    ->  Tx = T
-    ;   atom_codes(CN, CsCN),
-        phrase(jpl_type_classname_1(T), CsCN)
-    ->  jpl_assert(jpl_classname_type_cache(CN,T)),
-        true
-    ).
+% =========================================================
+% Java Entity Name (atom) <----> JPL Type (Prolog term)
+% =========================================================
 
-
-%! jpl_classname_type_cache( -Classname:className, -Type:type)
+%! jpl_entityname_to_type(+EntityName:atom, -Type:jpl_type)
 %
-% Classname is the atomic name of Type.
+% `EntityName` is the entity name (an atom) denoting a Java type,
+% to be mapped to a JPL type. This is the string returned by
+% `java.lang.Class.getName()`.
 %
-% NB may denote a class which cannot be found.
+% `Type` is the JPL type (a ground term) denoting the same Java type
+% as `EntityName` does.
+%
+% The Java type in question may be a reference type (class, abstract
+% class, interface), and array type or a primitive, including "void".
+%
+% Examples:
+%
+% ~~~
+% int                       int
+% integer                   class([],[integer])
+% void                      void
+% char                      char
+% double                    double
+% [D                        array(double)
+% [[I                       array(array(int))
+% java.lang.String          class([java,lang],['String'])
+% [Ljava.lang.String;       array(class([java,lang],['String']))
+% [[Ljava.lang.String;      array(array(class([java, lang], ['String'])))
+% [[[Ljava.util.Calendar;   array(array(array(class([java,util],['Calendar']))))
+% foo.bar.Bling$Blong       class([foo,bar],['Bling','Blong'])
+% ~~~
+%
+% NB uses caches where the class has already been mapped once before.
+%
+% @see https://docs.oracle.com/en/java/javase/14/docs/api/java.base/java/lang/Class.html#getName()
 
-:- dynamic jpl_classname_type_cache/2.
+jpl_entityname_to_type(EntityName, Type) :-
+    assertion(atomic(EntityName)),
+    (jpl_classname_type_cache(EntityName, Tx)
+    ->  (Tx = Type)
+    ;   jpl_entityname_to_type_with_caching(EntityName, Type)).
+
+jpl_entityname_to_type_with_caching(EN, T) :-
+    (atom_codes(EN,Cs),phrase(jpl_entityname(T), Cs))
+    ->  jpl_assert(jpl_classname_type_cache(EN,T)).
+
+%! jpl_type_to_entityname(+Type:jpl_type, -EntityName:atom)
+%
+% This is the converse of jpl_entityname_to_type/2
+
+jpl_type_to_entityname(Type, EntityName) :-
+    assertion(ground(Type)),
+    phrase(jpl_entityname(Type), Cs),
+    atom_codes(EntityName, Cs).
+
+%! jpl_classname_to_type(+EntityName:atom, -Type:jpl_type)
+%
+% This is a wrapper around jpl_entityname_to_type/2 to keep the
+% old exported predicate alive. The name of this predicate does
+% not fully reflect that it actually deals in entity names
+% instead of just class names.
+%
+% Use jpl_entityname_to_type/2 in preference.
+
+jpl_classname_to_type(EntityName, Type) :-
+   jpl_entityname_to_type(EntityName, Type).
+
+%! jpl_type_to_classname(+Type:jpl_type, -EntityName:atom)
+%
+% This is a wrapper around jpl_type_to_entityname/2 to keep the
+% old exported predicate alive. The name of this predicate does
+% not fully reflect that it actually deals in entity names
+% instead of just class names.
+%
+% Use jpl_type_to_entityname/2 in preference.
+
+% N.B. This predicate is exported, but internally it is only used to generate
+% exception information.
+
+jpl_type_to_classname(Type, EntityName) :-
+    jpl_type_to_entityname(Type, EntityName).
+
+% =========================================================
 
 
 %! jpl_datum_to_type(+Datum:datum, -Type:type)
@@ -2688,20 +2588,22 @@ jpl_datums_to_types([D|Ds], [T|Ts]) :-
     jpl_datums_to_types(Ds, Ts).
 
 
-%! jpl_ground_is_type(+X:term)
+%! jpl_ground_is_type(+X:jpl_type)
 %
-% X, known to be ground, is (or at least superficially resembles :-) a JPL type.
+% `X`, known to be ground, is (or at least superficially resembles :-) a JPL type.
+%
+% A (more complete) alternative would be to try to transfrom the `X` into its
+% entityname and see whether that works.
 
 jpl_ground_is_type(X) :-
     jpl_primitive_type(X),
     !.
 jpl_ground_is_type(array(X)) :-
     jpl_ground_is_type(X).
-jpl_ground_is_type(class(_,_)).
-jpl_ground_is_type(method(_,_)).
+jpl_ground_is_type(class(_,_)).  % Should one check that the anonymous params are list of atoms, with the second list nonempty?
+jpl_ground_is_type(method(_,_)). % Additional checks possible
 
 
-:- dynamic jpl_iref_type_cache/2.
 
 
 jpl_lineage_types_type_to_common_lineage_types(Ts, Tx, Ts0) :-
@@ -2803,6 +2705,7 @@ jpl_primitive_buffer_to_array(T, Xc, Bp, I, Size, [Vc|Vcs]) :-
 %! jpl_primitive_type(-Type:atom) is nondet
 %
 % Type is an atomic JPL representation of one of Java's primitive types.
+% N.B: `void` is not included.
 %
 %  ==
 %  ?- setof(Type, jpl_primitive_type(Type), Types).
@@ -2813,7 +2716,7 @@ jpl_primitive_type(boolean).
 jpl_primitive_type(char).
 jpl_primitive_type(byte).
 jpl_primitive_type(short).
-jpl_primitive_type(int).
+jpl_primitive_type(int).   % N.B. "int" not "integer"
 jpl_primitive_type(long).
 jpl_primitive_type(float).
 jpl_primitive_type(double).
@@ -2852,10 +2755,7 @@ jpl_primitive_type_super_type(T, Tx) :-
 % do that in Java)
 
 jpl_primitive_type_term_to_value(Type, Term, Val) :-
-    (   jpl_primitive_type_term_to_value_1(Type, Term, Val)
-    ->  true
-    ).
-
+    once(jpl_primitive_type_term_to_value_1(Type, Term, Val)). % make deterministic
 
 %! jpl_primitive_type_term_to_value_1(+Type, +RawValue, -WidenedValue)
 %
@@ -2951,9 +2851,7 @@ jpl_tag_to_type(Tag, Type) :-
 % This succeeds iff TypeX is assignable to TypeY.
 
 jpl_type_fits_type(Tx, Ty) :-
-    (   jpl_type_fits_type_1(Tx, Ty)
-    ->  true
-    ).
+    once(jpl_type_fits_type_1(Tx, Ty)). % make deterministic
 
 
 %! jpl_type_fits_type_1(+T1:type, +T2:type)
@@ -3063,111 +2961,62 @@ jpl_type_to_canonical_type(P, P) :-
     jpl_primitive_type(P).
 
 
-%! jpl_type_to_class(+Type:type, -Class:jref)
+%! jpl_type_to_class(+Type:jpl_type, -Class:jref)
+%
+% `Type` is the JPL type, a ground term designating a class or an array type.
 %
 % Incomplete types are now never cached (or otherwise passed around).
 %
 % jFindClass throws an exception if FCN can't be found.
 
-jpl_type_to_class(T, RefA) :-
-    (   ground(T)
-	->  (   jpl_class_tag_type_cache(RefB, T)
-	    ->  true
-	    ;   (   jpl_type_to_findclassname(T, FCN)   % peculiar syntax for FindClass()
-	        ->  jFindClass(FCN, RefB),       % which caches type of RefB
-	            jpl_cache_type_of_ref(class([java,lang],['Class']), RefB)    % 9/Nov/2004 bugfix (?)
-	        ),
-	        jpl_assert(jpl_class_tag_type_cache(RefB,T))
-	    ),
-	    RefA = RefB
-    ;   throwme(jpl_type_to_class,arg1_is_var)
-    ).
+jpl_type_to_class(Type, Class) :-
+    (ground(Type)
+    -> true
+    ; throwme(jpl_type_to_class,arg1_is_var)), % outta here if not ground
+    (jpl_class_tag_type_cache(RefB, Type)
+    ->  true
+    ;   (   jpl_type_to_java_findclass_descriptor(Type, FCN)
+        ->  jFindClass(FCN, RefB),       % which caches type of RefB
+            jpl_cache_type_of_ref(class([java,lang],['Class']), RefB)    % 9/Nov/2004 bugfix (?)
+        ),
+        jpl_assert(jpl_class_tag_type_cache(RefB,Type))
+    ),
+    Class = RefB.
 
 
-%! jpl_type_to_nicename(+Type:type, -NiceName:dottedName)
+%! jpl_type_to_java_field_descriptor(+Type:jpl_type, -Descriptor:atom)
 %
-% Type, which is a class or array type (not sure about the others...),
-% is denoted by ClassName in dotted syntax.
+% Type (the JPL type, a Prolog term) is mapped to the corresponding stringy
+% Java field descriptor (an atom)
 %
-% NB is this used? is "nicename" well defined and necessary?
-%
-% NB this could use caching if indexing were amenable.
-%
-% Examples
-%  ==
-%  ?- jpl:jpl_type_to_nicename(class([java,util],['Date']), Name).
-%  Name = 'java.util.Date'.
-%
-%  ?- jpl:jpl_type_to_nicename(boolean, Name).
-%  Name = boolean.
-%  ==
-%
-% @see jpl_type_to_classname/2
+% TODO: I'd cache this, but I'd prefer more efficient indexing on types (hashed?)
 
-jpl_type_to_nicename(T, NN) :-
-    (   jpl_primitive_type(T)
-    ->  NN = T
-    ;   (   phrase(jpl_type_classname_1(T), Cs)
-        ->  atom_codes(CNx, Cs),                                % green commit to first solution
-            NN = CNx
-        )
-    ).
+jpl_type_to_java_field_descriptor(T, FD) :-
+    % once(phrase(jpl_field_descriptor(T,slashy), Cs)), % make deterministic
+    phrase(jpl_field_descriptor(T,slashy), Cs), % make deterministic
+    atom_codes(FD, Cs).
 
-
-%! jpl_type_to_classname(+Type:type, -ClassName:dottedName)
+%! jpl_type_to_java_method_descriptor(+Type:jpl_type, -Descriptor:atom)
 %
-% Type, which is a class or array type (not sure about the others...),
-% is denoted by ClassName in dotted syntax.
+% Type (the JPL type, a Prolog term) is mapped to the corresponding stringy
+% Java method descriptor (an atom)
 %
-% e.g. jpl_type_to_classname(class([java,util],['Date']), 'java.util.Date')
+% TODO: Caching might be nice (but is it worth it?)
+
+jpl_type_to_java_method_descriptor(T, MD) :-
+    % once(phrase(jpl_method_descriptor(T), Cs)), % make deterministic (should not be needed)
+    phrase(jpl_method_descriptor(T), Cs),
+    atom_codes(MD, Cs).
+
+%! jpl_type_to_java_findclass_descriptor(+Type:jpl_type, -Descriptor:atom)
 %
-% @see jpl_type_to_nicename/2
+% Type (the JPL type, a Prolog term) is mapped to the corresponding stringy
+% Java findclass descriptor (an atom) to be used for JNI's "FindClass" function.
 
-jpl_type_to_classname(T, CN) :-
-    (   phrase(jpl_type_classname_1(T), Cs)
-    ->  atom_codes(CNx, Cs),                                % green commit to first solution
-        CN = CNx
-    ).
-
-
-%! jpl_type_to_descriptor(+Type:type, -Descriptor:descriptor)
-%
-% Type (denoting any Java type)
-% (can also be a JPL method/2 structure (?!))
-% is represented by Descriptor (JVM internal syntax)
-%
-% Example
-%  ==
-%  ?- jpl:jpl_type_to_descriptor(class([java,util],['Date']), Descriptor).
-%  Descriptor = 'Ljava/util/Date;'.
-%  ==
-%
-% I'd cache this, but I'd prefer more efficient indexing on types (hashed?)
-
-jpl_type_to_descriptor(T, D) :-
-    (   phrase(jpl_type_descriptor_1(T), Cs)
-    ->  atom_codes(Dx, Cs),
-        D = Dx
-    ).
-
-
-%! jpl_type_to_findclassname(+Type:type, -FindClassName:findClassName)
-%
-% FindClassName denotes Type (class or array only)
-% in the syntax required peculiarly by JNI's FindClass().
-%
-% Example
-%  ==
-%  ?- jpl:jpl_type_to_findclassname(class([java,util],['Date']), FindClassName).
-%  FindClassName = 'java/util/Date'.
-%  ==
-
-jpl_type_to_findclassname(T, FCN) :-
-    (   phrase(jpl_type_findclassname(T), Cs)
-    ->  atom_codes(FCNx, Cs),
-        FCN = FCNx
-    ).
-
+jpl_type_to_java_findclass_descriptor(T, FCD) :-
+    % once(phrase(jpl_findclass_descriptor(T), Cs)), % make deterministic (should not be needed)
+    phrase(jpl_findclass_descriptor(T), Cs),
+    atom_codes(FCD, Cs).
 
 %! jpl_type_to_super_type(+Type:type, -SuperType:type)
 %
@@ -4347,6 +4196,575 @@ dir_per_line([H|T]) -->
     [ nl, '  ~q'-[H] ],
     dir_per_line(T).
 
+         /****************************************************************************
+         * PARSING/GENERATING ENTITY NAME / FINDCLASS DESCRIPTOR / METHOD DESCRIPTOR *
+         ****************************************************************************/
+
+% ===
+% PRINCIPLE
+%
+% We process list of character codes in the DCG (as opposed to lists of
+% characters)
+%
+% In SWI Prolog the character codes are the Unicode code values - the DCGs
+% looking at individual characters of a Java identifier expect this.
+%
+% To generate list of character codes from literals, the backquote notation
+% can be used:
+%
+% ?- X=`alpha`.
+% X = [97, 108, 112, 104, 97].
+%
+% However, Jab Wielmaker says:
+%
+% "Please use "string" for terminals in DCGs. The SWI-Prolog DCG compiler
+%  handles these correctly and this retains compatibility."
+%
+% So we do that.
+% ===
+
+% jpl_entityname//1
+%
+% Relate a Java-side "entity name" (a String as returned by Class.getName())
+% (in the DCG accumulator as a list of Unicode code values) to JPL's
+% Prolog-side "type term".
+%
+% For example:
+%
+% ~~~
+%       Java-side "entity name"  <----->   JPL Prolog-side "type term"
+%         "java.util.Date"                 class([java,util],['Date'])
+% ~~~
+%
+% @see https://docs.oracle.com/en/java/javase/14/docs/api/java.base/java/lang/Class.html#getName()
+%
+% Example for getName() calls generating entity names
+%
+% ~~~
+%
+% class TJ {
+%   public static final void main(String[] argv) {
+%
+%      System.out.println(void.class.getName());        // void
+%      System.out.println(Void.TYPE.getName());         // void
+%      System.out.println(Void.class.getName());        // java.lang.Void
+%
+%      System.out.println(char.class.getName());        // char
+%      System.out.println(Character.TYPE.getName());    // char
+%      System.out.println(Character.class.getName());   // java.lang.Character
+%      System.out.println(Character.valueOf('x').getClass().getName());  // java.lang.Character
+%
+%      System.out.println(int[].class.getName());                               // [I
+%      System.out.println((new int[4]).getClass().getName());                   // [I
+%      int[] a = {1,2,3}; System.out.println(a.getClass().getName());           // [I
+%
+%      System.out.println(int[][].class.getName());                             // [[I
+%      System.out.println((new int[4][4]).getClass().getName());                // [[I
+%      int[][] aa = {{1},{2},{3}}; System.out.println(aa.getClass().getName()); // [[I
+%
+%      System.out.println(Integer[][].class.getName());                             // [[Ljava.lang.Integer;
+%      System.out.println((new Integer[4][4]).getClass().getName());                // [[Ljava.lang.Integer;
+%      Integer[][] bb = {{1},{2},{3}}; System.out.println(bb.getClass().getName()); // [[Ljava.lang.Integer;
+%
+%   }
+% }
+% ~~~
+%
+% Note that We can list the possible "jpl type terms" directly in the head of
+% jpl_entityname//1 (except for the primitives). This helps in clause selection
+% and documentation. Note that the fact that the last two clauses T are not tagged as
+% "primitive()" makes this representation nonuniform; should be fixed at some time.
+% ---
+
+jpl_entityname(class(Ps,Cs)) --> jpl_classname(class(Ps,Cs),dotty),!.
+jpl_entityname(array(T))     --> jpl_array_type_descriptor(array(T),dotty),!.
+jpl_entityname(void)         --> "void",!.
+jpl_entityname(P)            --> jpl_primitive_entityname(P).
+
+% ---
+% The "findclass descriptor" is used for the JNI function FindClass and is
+% either an array type descriptor with a "slashy" package name or directly
+% a classname, also with a "slasgy" package name
+% ---
+
+jpl_findclass_descriptor(array(T))     --> jpl_array_type_descriptor(array(T),slashy),!.
+jpl_findclass_descriptor(class(Ps,Cs)) --> jpl_classname(class(Ps,Cs),slashy).
+
+% ---
+% The "method descriptor" is used to find a method ID based on the method
+% signature. It contains method arguments and type of method return value
+% ---
+
+jpl_method_descriptor(method(Ts,T)) --> "(", jpl_method_descriptor_args(Ts), ")", jpl_method_descriptor_retval(T).
+
+jpl_method_descriptor_args([T|Ts]) --> jpl_field_descriptor(T,slashy), !, jpl_method_descriptor_args(Ts).
+jpl_method_descriptor_args([]) --> [].
+
+jpl_method_descriptor_retval(void) --> "V".
+jpl_method_descriptor_retval(T) --> jpl_field_descriptor(T,slashy).
+
+% ---
+% The "binary classname" (i.e. the classname as it appears in binaries) as
+% specified in The "Java Language Specification".
+% See "Binary Compatibility" - "The Form of a Binary"
+% https://docs.oracle.com/javase/specs/jls/se14/html/jls-13.html#jls-13.1
+% which points to the "fully qualified name" and "canonical name"
+% https://docs.oracle.com/javase/specs/jls/se14/html/jls-6.html#jls-6.7
+%
+% For JNI, we can switch to "slashy" mode instead of the "dotty" mode, which
+% technically makes this NOT the "binary classname", but we keep the predicate name.
+% ---
+
+jpl_classname(class(Ps,Cs),Mode) --> jpl_package_parts(Ps,Mode), jpl_class_parts(Cs).
+
+% ---
+% The qualified name of the package (which may be empty if it is the
+% unnamed package). This is a series of Java identifiers separated by dots, but
+% in order to reduce codesize, we switch to the "slash" separator depending
+% on a second argument, the mode, which is either "dotty" or "slashy".
+% "The fully qualified name of a named package that is not a subpackage of a
+% named package is its simple name." ... "A simple name is a single identifier."
+% https://docs.oracle.com/javase/specs/jls/se14/html/jls-6.html#jls-6.7
+% Note that the last '.' is not considered a separator towards the subsequent
+% class parts but as a terminator of the package parts sequence (it's a view
+% less demanding of backtracking)
+% ---
+
+jpl_package_parts([A|As],dotty)  --> jpl_java_id(A), ".", !, jpl_package_parts(As,dotty).
+jpl_package_parts([A|As],slashy) --> jpl_java_id(A), "/", !, jpl_package_parts(As,slashy).
+jpl_package_parts([],_)          --> [].
+
+% ---
+% The class parts of a class name (everything beyond the last dot
+% of the package prefix, if it exists). This comes from "13.1 - The form of
+% a binary", where it is laid out a bit confusingly.
+% https://docs.oracle.com/javase/specs/jls/se14/html/jls-13.html#jls-13.1
+%
+% PROBLEM 2020-08:
+%
+% Here is an ambiguity that I haven't been able to resolve: '$' is a perfectly
+% legitimate character both at the start and in the middle of a classname,
+% in fact you can create classes with '$' inside the classname and they compile
+% marvelously (try it!). However it is also used as separator for inner class
+% names ... but not really! In fact, it is just a concatentation character for
+% a _generated class name_ (that makes sense - an inner class is a syntactic
+% construct of Java the Language, but of no concern to the JVM, not even for
+% access checking because the compiler is supposed to have bleached out any
+% problemtic code).
+% Parsing such a generated class name can go south in several different ways:
+% '$' at the begging, '$' at the end, multiple runs of '$$$' .. one should not
+% attempt to do it!
+% But the original JPL code does, so we keep this practice for now.
+% ---
+
+jpl_class_parts(Cs) --> { nonvar(Cs), ! },                 % guard
+                        { atomic_list_concat(Cs,'$',A) },  % fuse known Cs with '$'
+                        jpl_java_type_id(A).               % verify it & insert it into list
+
+jpl_class_parts(Cs) --> { var(Cs), ! },                % guard
+                        jpl_java_type_id(A),           % grab an id including its '$'
+                        { messy_dollar_split(A,Cs) }.  % split it along '$'
+
+
+% ---
+% "field descriptors" appear in method signatures or inside array type
+% descriptors (which are itself field descriptors)
+% ---
+
+jpl_field_descriptor(class(Ps,Cs),Mode)  --> jpl_reference_type_descriptor(class(Ps,Cs),Mode),!.
+jpl_field_descriptor(array(T),Mode)      --> jpl_array_type_descriptor(array(T),Mode),!.
+jpl_field_descriptor(T,_)                --> jpl_primitive_type_descriptor(T). % sadly untagged with primitive(_) in the head
+
+jpl_reference_type_descriptor(class(Ps,Cs),Mode) --> "L", jpl_classname(class(Ps,Cs),Mode), ";".
+
+jpl_array_type_descriptor(array(T),Mode) --> "[", jpl_field_descriptor(T,Mode).
+
+% ---
+% Breaking a bare classname at the '$'
+% ---
+% Heuristic: Only a '$' flanked to the left by a valid character
+% that is a non-dollar and to the right by a valid character that
+% may or may not be a dollar gives rise to split.
+%
+% The INVERSE of messy_dollar_split/2 is atomic_list_concat/3
+
+messy_dollar_split(A,Out) :-
+   assertion(A \== ''),
+   atom_chars(A,Chars),
+   append([''|Chars],[''],GAChars), % GA is a "guarded A char list" flanked by empties and contains at least 3 chars
+   triple_process(GAChars,[],[],RunsOut),
+   postprocess_messy_dollar_split_runs(RunsOut,Out).
+
+postprocess_messy_dollar_split_runs(Runs,Out) :-
+   reverse(Runs,R1),
+   maplist([Rin,Rout]>>reverse(Rin,Rout),R1,O1),
+   maplist([Chars,Atom]>>atom_chars(Atom,Chars),O1,Out).
+
+% Split only between P and N, dropping C, when:
+% 1) C is a $ and P is not a dollar and not a start of line
+% 2) N is not the end of line
+
+triple_process([P,'$',N|Rest],Run,Runs,Out) :-
+   N \== '', P \== '$' , P \== '',!,
+   triple_process(['',N|Rest],[],[Run|Runs],Out).
+
+triple_process(['','$',N|Rest],Run,Runs,Out) :-
+   !,
+   triple_process(['',N|Rest],['$'|Run],Runs,Out).
+
+triple_process([_,C,N|Rest],Run,Runs,Out) :-
+   C \== '$',!,
+   triple_process([C,N|Rest],[C|Run],Runs,Out).
+
+triple_process([_,C,''],Run,Runs,[[C|Run]|Runs]) :- !.
+
+triple_process([_,''],Run,Runs,[Run|Runs]).
+
+% ===
+% Low-level DCG rules
+% ===
+
+% ---
+% A Java type identifier is a Java identifier different from "var" and "yield"
+% ---
+
+jpl_java_type_id(I)  --> jpl_java_id(I), { \+memberchk(I,[var,yield]) }.
+
+% ---
+% The Java identifier is described at
+% https://docs.oracle.com/javase/specs/jls/se14/html/jls-3.html#jls-Identifier
+% ---
+
+jpl_java_id(I) --> jpl_java_id_raw(I),
+                   { \+jpl_java_keyword(I),
+                     \+jpl_java_boolean_literal(I),
+                     \+jpl_java_null_literal(I) }.
+
+% ---
+% For direct handling of an identifier, we suffer symmetry breakdown.
+% ---
+
+jpl_java_id_raw(A) --> { atom(A),! },  % guard
+                       { atom_codes(A,[C|Cs]) }, % explode A
+                       { jpl_java_id_start_char(C) },
+                       [C],
+                       jpl_java_id_part_chars(Cs).
+
+% building X from the character code list
+
+jpl_java_id_raw(A) --> { var(A),! },  % guard
+                       [C],
+                       { jpl_java_id_start_char(C) },
+                       jpl_java_id_part_chars(Cs),
+                       { atom_codes(A,[C|Cs]) }. % fuse A
+
+jpl_java_id_part_chars([C|Cs]) --> [C], { jpl_java_id_part_char(C) } ,!, jpl_java_id_part_chars(Cs).
+jpl_java_id_part_chars([])     --> [].
+
+% ---
+% jpl_primitive_in_array//1
+% Described informally in Javadoc for Class.getName()
+% https://docs.oracle.com/en/java/javase/14/docs/api/java.base/java/lang/Class.html#getName()
+% The left-hand side should (the JPL type) really be tagged with primitive(boolean) etc.
+% ---
+
+jpl_primitive_type_descriptor(boolean) --> "Z",!.
+jpl_primitive_type_descriptor(byte)    --> "B",!.
+jpl_primitive_type_descriptor(char)    --> "C",!.
+jpl_primitive_type_descriptor(double)  --> "D",!.
+jpl_primitive_type_descriptor(float)   --> "F",!.
+jpl_primitive_type_descriptor(int)     --> "I",!.
+jpl_primitive_type_descriptor(long)    --> "J",!.
+jpl_primitive_type_descriptor(short)   --> "S".
+
+% ---
+% jpl_primitive_entityname//1
+% These are just the primitive names.
+% The left-hand side should (the JPL type) really be tagged with primitive(boolean) etc.
+% ---
+
+jpl_primitive_entityname(boolean) --> "boolean" ,!.
+jpl_primitive_entityname(byte)    --> "byte"    ,!.
+jpl_primitive_entityname(char)    --> "char"    ,!.
+jpl_primitive_entityname(double)  --> "double"  ,!.
+jpl_primitive_entityname(float)   --> "float"   ,!.
+jpl_primitive_entityname(int)     --> "int"     ,!.
+jpl_primitive_entityname(long)    --> "long"    ,!.
+jpl_primitive_entityname(short)   --> "short".
+
+% ---
+% Certain java keywords that may not occur as java identifier
+% ---
+
+jpl_java_boolean_literal(true).
+jpl_java_boolean_literal(false).
+
+jpl_java_null_literal(null).
+
+jpl_java_keyword('_').
+jpl_java_keyword(abstract).
+jpl_java_keyword(assert).
+jpl_java_keyword(boolean).
+jpl_java_keyword(break).
+jpl_java_keyword(byte).
+jpl_java_keyword(case).
+jpl_java_keyword(catch).
+jpl_java_keyword(char).
+jpl_java_keyword(class).
+jpl_java_keyword(const).
+jpl_java_keyword(continue).
+jpl_java_keyword(default).
+jpl_java_keyword(do).
+jpl_java_keyword(double).
+jpl_java_keyword(else).
+jpl_java_keyword(enum).
+jpl_java_keyword(extends).
+jpl_java_keyword(final).
+jpl_java_keyword(finally).
+jpl_java_keyword(float).
+jpl_java_keyword(for).
+jpl_java_keyword(goto).
+jpl_java_keyword(if).
+jpl_java_keyword(implements).
+jpl_java_keyword(import).
+jpl_java_keyword(instanceof).
+jpl_java_keyword(int).
+jpl_java_keyword(interface).
+jpl_java_keyword(long).
+jpl_java_keyword(native).
+jpl_java_keyword(new).
+jpl_java_keyword(package).
+jpl_java_keyword(private).
+jpl_java_keyword(protected).
+jpl_java_keyword(public).
+jpl_java_keyword(return).
+jpl_java_keyword(short).
+jpl_java_keyword(static).
+jpl_java_keyword(strictfp).
+jpl_java_keyword(super).
+jpl_java_keyword(switch).
+jpl_java_keyword(synchronized).
+jpl_java_keyword(this).
+jpl_java_keyword(throw).
+jpl_java_keyword(throws).
+jpl_java_keyword(transient).
+jpl_java_keyword(try).
+jpl_java_keyword(void).
+jpl_java_keyword(volatile).
+jpl_java_keyword(while).
+
+% ===
+% Classify codepoints (i.e. integers) as "Java identifier start/part characters"
+%
+% A "Java identifier" starts with a "Java identifier start character" and
+% continues with a "Java identifier part character".
+%
+% A "Java identifier start character" is a character for which
+% Character.isJavaIdentifierStart(c) returns true, where "c" can be a
+% Java char or an integer Unicode code value (basically, that's the definition).
+%
+% Similarly, a "Java identifier part character" is a character for which
+% point Character.isJavaIdentifierPart(c) returns true
+%
+% See:
+%
+% https://docs.oracle.com/en/java/javase/14/docs/api/java.base/java/lang/Character.html#isJavaIdentifierStart(int)
+% https://docs.oracle.com/en/java/javase/14/docs/api/java.base/java/lang/Character.html#isJavaIdentifierPart(int)
+%
+% A simple Java program was used to generate the runs of unicode character
+% points listed below. They are searched lineraly. Generally, a
+% code point/value encountered by jpl would be below even 255 and so be
+% found quickly
+%
+% PROBLEM:
+%
+% 1) If the Prolog implementation does not represent characters internally
+%    with Unicode code values, i.e. if atom_codes/2 takes/returns other values
+%    than Unicode code values (may be the case for Prologs other than SWI Prolog)
+%    an implementation-dependent mapping from/to Unicode will have to be performed
+%    first!
+%
+% 2) Is this slow or not? It depends on what the compiler does.
+% ===
+
+jpl_java_id_start_char(C) :-
+   assertion(integer(C)),
+   java_id_start_char_ranges(Ranges), % retrieve ranges
+   char_inside_range(C,Ranges).               % check
+
+jpl_java_id_part_char(C) :-
+   assertion(integer(C)),
+   java_id_part_char_ranges(Ranges),  % retrieve ranges
+   char_inside_range(C,Ranges).               % check
+
+char_inside_range(C,[[_Low,High]|Ranges]) :-
+   High < C,!,char_inside_range(C,Ranges).
+
+char_inside_range(C,[[Low,High]|_]) :-
+   Low =< C, C =< High.
+
+% ---
+% The ranges below are generated with a Java program, then printed
+% See "CharRangePrinter.java"
+% Note that 36 is "$" which IS allowed as start and part character!
+% In fact, there are class names that start with '$' (which is why the
+% current version of JPL cannot connect to LibreOffice)
+% ---
+
+java_id_start_char_ranges(
+   [[36,36],[65,90],[95,95],[97,122],[162,165],[170,170],[181,181],[186,186],
+   [192,214],[216,246],[248,705],[710,721],[736,740],[748,748],[750,750],
+   [880,884],[886,887],[890,893],[895,895],[902,902],[904,906],[908,908],
+   [910,929],[931,1013],[1015,1153],[1162,1327],[1329,1366],[1369,1369],
+   [1376,1416],[1423,1423],[1488,1514],[1519,1522],[1547,1547],[1568,1610],
+   [1646,1647],[1649,1747],[1749,1749],[1765,1766],[1774,1775],[1786,1788],
+   [1791,1791],[1808,1808],[1810,1839],[1869,1957],[1969,1969],[1994,2026],
+   [2036,2037],[2042,2042],[2046,2069],[2074,2074],[2084,2084],[2088,2088],
+   [2112,2136],[2144,2154],[2208,2228],[2230,2237],[2308,2361],[2365,2365],
+   [2384,2384],[2392,2401],[2417,2432],[2437,2444],[2447,2448],[2451,2472],
+   [2474,2480],[2482,2482],[2486,2489],[2493,2493],[2510,2510],[2524,2525],
+   [2527,2529],[2544,2547],[2555,2556],[2565,2570],[2575,2576],[2579,2600],
+   [2602,2608],[2610,2611],[2613,2614],[2616,2617],[2649,2652],[2654,2654],
+   [2674,2676],[2693,2701],[2703,2705],[2707,2728],[2730,2736],[2738,2739],
+   [2741,2745],[2749,2749],[2768,2768],[2784,2785],[2801,2801],[2809,2809],
+   [2821,2828],[2831,2832],[2835,2856],[2858,2864],[2866,2867],[2869,2873],
+   [2877,2877],[2908,2909],[2911,2913],[2929,2929],[2947,2947],[2949,2954],
+   [2958,2960],[2962,2965],[2969,2970],[2972,2972],[2974,2975],[2979,2980],
+   [2984,2986],[2990,3001],[3024,3024],[3065,3065],[3077,3084],[3086,3088],
+   [3090,3112],[3114,3129],[3133,3133],[3160,3162],[3168,3169],[3200,3200],
+   [3205,3212],[3214,3216],[3218,3240],[3242,3251],[3253,3257],[3261,3261],
+   [3294,3294],[3296,3297],[3313,3314],[3333,3340],[3342,3344],[3346,3386],
+   [3389,3389],[3406,3406],[3412,3414],[3423,3425],[3450,3455],[3461,3478],
+   [3482,3505],[3507,3515],[3517,3517],[3520,3526],[3585,3632],[3634,3635],
+   [3647,3654],[3713,3714],[3716,3716],[3718,3722],[3724,3747],[3749,3749],
+   [3751,3760],[3762,3763],[3773,3773],[3776,3780],[3782,3782],[3804,3807],
+   [3840,3840],[3904,3911],[3913,3948],[3976,3980],[4096,4138],[4159,4159],
+   [4176,4181],[4186,4189],[4193,4193],[4197,4198],[4206,4208],[4213,4225],
+   [4238,4238],[4256,4293],[4295,4295],[4301,4301],[4304,4346],[4348,4680],
+   [4682,4685],[4688,4694],[4696,4696],[4698,4701],[4704,4744],[4746,4749],
+   [4752,4784],[4786,4789],[4792,4798],[4800,4800],[4802,4805],[4808,4822],
+   [4824,4880],[4882,4885],[4888,4954],[4992,5007],[5024,5109],[5112,5117],
+   [5121,5740],[5743,5759],[5761,5786],[5792,5866],[5870,5880],[5888,5900],
+   [5902,5905],[5920,5937],[5952,5969],[5984,5996],[5998,6000],[6016,6067],
+   [6103,6103],[6107,6108],[6176,6264],[6272,6276],[6279,6312],[6314,6314],
+   [6320,6389],[6400,6430],[6480,6509],[6512,6516],[6528,6571],[6576,6601],
+   [6656,6678],[6688,6740],[6823,6823],[6917,6963],[6981,6987],[7043,7072],
+   [7086,7087],[7098,7141],[7168,7203],[7245,7247],[7258,7293],[7296,7304],
+   [7312,7354],[7357,7359],[7401,7404],[7406,7411],[7413,7414],[7418,7418],
+   [7424,7615],[7680,7957],[7960,7965],[7968,8005],[8008,8013],[8016,8023],
+   [8025,8025],[8027,8027],[8029,8029],[8031,8061],[8064,8116],[8118,8124],
+   [8126,8126],[8130,8132],[8134,8140],[8144,8147],[8150,8155],[8160,8172],
+   [8178,8180],[8182,8188],[8255,8256],[8276,8276],[8305,8305],[8319,8319],
+   [8336,8348],[8352,8383],[8450,8450],[8455,8455],[8458,8467],[8469,8469],
+   [8473,8477],[8484,8484],[8486,8486],[8488,8488],[8490,8493],[8495,8505],
+   [8508,8511],[8517,8521],[8526,8526],[8544,8584],[11264,11310],[11312,11358],
+   [11360,11492],[11499,11502],[11506,11507],[11520,11557],[11559,11559],
+   [11565,11565],[11568,11623],[11631,11631],[11648,11670],[11680,11686],
+   [11688,11694],[11696,11702],[11704,11710],[11712,11718],[11720,11726],
+   [11728,11734],[11736,11742],[11823,11823],[12293,12295],[12321,12329],
+   [12337,12341],[12344,12348],[12353,12438],[12445,12447],[12449,12538],
+   [12540,12543],[12549,12591],[12593,12686],[12704,12730],[12784,12799],
+   [13312,19893],[19968,40943],[40960,42124],[42192,42237],[42240,42508],
+   [42512,42527],[42538,42539],[42560,42606],[42623,42653],[42656,42735],
+   [42775,42783],[42786,42888],[42891,42943],[42946,42950],[42999,43009],
+   [43011,43013],[43015,43018],[43020,43042],[43064,43064],[43072,43123],
+   [43138,43187],[43250,43255],[43259,43259],[43261,43262],[43274,43301],
+   [43312,43334],[43360,43388],[43396,43442],[43471,43471],[43488,43492],
+   [43494,43503],[43514,43518],[43520,43560],[43584,43586],[43588,43595],
+   [43616,43638],[43642,43642],[43646,43695],[43697,43697],[43701,43702],
+   [43705,43709],[43712,43712],[43714,43714],[43739,43741],[43744,43754],
+   [43762,43764],[43777,43782],[43785,43790],[43793,43798],[43808,43814],
+   [43816,43822],[43824,43866],[43868,43879],[43888,44002],[44032,55203],
+   [55216,55238],[55243,55291],[63744,64109],[64112,64217],[64256,64262],
+   [64275,64279],[64285,64285],[64287,64296],[64298,64310],[64312,64316],
+   [64318,64318],[64320,64321],[64323,64324],[64326,64433],[64467,64829],
+   [64848,64911],[64914,64967],[65008,65020],[65075,65076],[65101,65103],
+   [65129,65129],[65136,65140],[65142,65276],[65284,65284],[65313,65338],
+   [65343,65343],[65345,65370],[65382,65470],[65474,65479],[65482,65487],
+   [65490,65495],[65498,65500],[65504,65505],[65509,65510]]).
+
+java_id_part_char_ranges(
+   [[0,8],[14,27],[36,36],[48,57],[65,90],[95,95],[97,122],[127,159],[162,165],
+   [170,170],[173,173],[181,181],[186,186],[192,214],[216,246],[248,705],
+   [710,721],[736,740],[748,748],[750,750],[768,884],[886,887],[890,893],
+   [895,895],[902,902],[904,906],[908,908],[910,929],[931,1013],[1015,1153],
+   [1155,1159],[1162,1327],[1329,1366],[1369,1369],[1376,1416],[1423,1423],
+   [1425,1469],[1471,1471],[1473,1474],[1476,1477],[1479,1479],[1488,1514],
+   [1519,1522],[1536,1541],[1547,1547],[1552,1562],[1564,1564],[1568,1641],
+   [1646,1747],[1749,1757],[1759,1768],[1770,1788],[1791,1791],[1807,1866],
+   [1869,1969],[1984,2037],[2042,2042],[2045,2093],[2112,2139],[2144,2154],
+   [2208,2228],[2230,2237],[2259,2403],[2406,2415],[2417,2435],[2437,2444],
+   [2447,2448],[2451,2472],[2474,2480],[2482,2482],[2486,2489],[2492,2500],
+   [2503,2504],[2507,2510],[2519,2519],[2524,2525],[2527,2531],[2534,2547],
+   [2555,2556],[2558,2558],[2561,2563],[2565,2570],[2575,2576],[2579,2600],
+   [2602,2608],[2610,2611],[2613,2614],[2616,2617],[2620,2620],[2622,2626],
+   [2631,2632],[2635,2637],[2641,2641],[2649,2652],[2654,2654],[2662,2677],
+   [2689,2691],[2693,2701],[2703,2705],[2707,2728],[2730,2736],[2738,2739],
+   [2741,2745],[2748,2757],[2759,2761],[2763,2765],[2768,2768],[2784,2787],
+   [2790,2799],[2801,2801],[2809,2815],[2817,2819],[2821,2828],[2831,2832],
+   [2835,2856],[2858,2864],[2866,2867],[2869,2873],[2876,2884],[2887,2888],
+   [2891,2893],[2902,2903],[2908,2909],[2911,2915],[2918,2927],[2929,2929],
+   [2946,2947],[2949,2954],[2958,2960],[2962,2965],[2969,2970],[2972,2972],
+   [2974,2975],[2979,2980],[2984,2986],[2990,3001],[3006,3010],[3014,3016],
+   [3018,3021],[3024,3024],[3031,3031],[3046,3055],[3065,3065],[3072,3084],
+   [3086,3088],[3090,3112],[3114,3129],[3133,3140],[3142,3144],[3146,3149],
+   [3157,3158],[3160,3162],[3168,3171],[3174,3183],[3200,3203],[3205,3212],
+   [3214,3216],[3218,3240],[3242,3251],[3253,3257],[3260,3268],[3270,3272],
+   [3274,3277],[3285,3286],[3294,3294],[3296,3299],[3302,3311],[3313,3314],
+   [3328,3331],[3333,3340],[3342,3344],[3346,3396],[3398,3400],[3402,3406],
+   [3412,3415],[3423,3427],[3430,3439],[3450,3455],[3458,3459],[3461,3478],
+   [3482,3505],[3507,3515],[3517,3517],[3520,3526],[3530,3530],[3535,3540],
+   [3542,3542],[3544,3551],[3558,3567],[3570,3571],[3585,3642],[3647,3662],
+   [3664,3673],[3713,3714],[3716,3716],[3718,3722],[3724,3747],[3749,3749],
+   [3751,3773],[3776,3780],[3782,3782],[3784,3789],[3792,3801],[3804,3807],
+   [3840,3840],[3864,3865],[3872,3881],[3893,3893],[3895,3895],[3897,3897],
+   [3902,3911],[3913,3948],[3953,3972],[3974,3991],[3993,4028],[4038,4038],
+   [4096,4169],[4176,4253],[4256,4293],[4295,4295],[4301,4301],[4304,4346],
+   [4348,4680],[4682,4685],[4688,4694],[4696,4696],[4698,4701],[4704,4744],
+   [4746,4749],[4752,4784],[4786,4789],[4792,4798],[4800,4800],[4802,4805],
+   [4808,4822],[4824,4880],[4882,4885],[4888,4954],[4957,4959],[4992,5007],
+   [5024,5109],[5112,5117],[5121,5740],[5743,5759],[5761,5786],[5792,5866],
+   [5870,5880],[5888,5900],[5902,5908],[5920,5940],[5952,5971],[5984,5996],
+   [5998,6000],[6002,6003],[6016,6099],[6103,6103],[6107,6109],[6112,6121],
+   [6155,6158],[6160,6169],[6176,6264],[6272,6314],[6320,6389],[6400,6430],
+   [6432,6443],[6448,6459],[6470,6509],[6512,6516],[6528,6571],[6576,6601],
+   [6608,6617],[6656,6683],[6688,6750],[6752,6780],[6783,6793],[6800,6809],
+   [6823,6823],[6832,6845],[6912,6987],[6992,7001],[7019,7027],[7040,7155],
+   [7168,7223],[7232,7241],[7245,7293],[7296,7304],[7312,7354],[7357,7359],
+   [7376,7378],[7380,7418],[7424,7673],[7675,7957],[7960,7965],[7968,8005],
+   [8008,8013],[8016,8023],[8025,8025],[8027,8027],[8029,8029],[8031,8061],
+   [8064,8116],[8118,8124],[8126,8126],[8130,8132],[8134,8140],[8144,8147],
+   [8150,8155],[8160,8172],[8178,8180],[8182,8188],[8203,8207],[8234,8238],
+   [8255,8256],[8276,8276],[8288,8292],[8294,8303],[8305,8305],[8319,8319],
+   [8336,8348],[8352,8383],[8400,8412],[8417,8417],[8421,8432],[8450,8450],
+   [8455,8455],[8458,8467],[8469,8469],[8473,8477],[8484,8484],[8486,8486],
+   [8488,8488],[8490,8493],[8495,8505],[8508,8511],[8517,8521],[8526,8526],
+   [8544,8584],[11264,11310],[11312,11358],[11360,11492],[11499,11507],
+   [11520,11557],[11559,11559],[11565,11565],[11568,11623],[11631,11631],
+   [11647,11670],[11680,11686],[11688,11694],[11696,11702],[11704,11710],
+   [11712,11718],[11720,11726],[11728,11734],[11736,11742],[11744,11775],
+   [11823,11823],[12293,12295],[12321,12335],[12337,12341],[12344,12348],
+   [12353,12438],[12441,12442],[12445,12447],[12449,12538],[12540,12543],
+   [12549,12591],[12593,12686],[12704,12730],[12784,12799],[13312,19893],
+   [19968,40943],[40960,42124],[42192,42237],[42240,42508],[42512,42539],
+   [42560,42607],[42612,42621],[42623,42737],[42775,42783],[42786,42888],
+   [42891,42943],[42946,42950],[42999,43047],[43064,43064],[43072,43123],
+   [43136,43205],[43216,43225],[43232,43255],[43259,43259],[43261,43309],
+   [43312,43347],[43360,43388],[43392,43456],[43471,43481],[43488,43518],
+   [43520,43574],[43584,43597],[43600,43609],[43616,43638],[43642,43714],
+   [43739,43741],[43744,43759],[43762,43766],[43777,43782],[43785,43790],
+   [43793,43798],[43808,43814],[43816,43822],[43824,43866],[43868,43879],
+   [43888,44010],[44012,44013],[44016,44025],[44032,55203],[55216,55238],
+   [55243,55291],[63744,64109],[64112,64217],[64256,64262],[64275,64279],
+   [64285,64296],[64298,64310],[64312,64316],[64318,64318],[64320,64321],
+   [64323,64324],[64326,64433],[64467,64829],[64848,64911],[64914,64967],
+   [65008,65020],[65024,65039],[65056,65071],[65075,65076],[65101,65103],
+   [65129,65129],[65136,65140],[65142,65276],[65279,65279],[65284,65284],
+   [65296,65305],[65313,65338],[65343,65343],[65345,65370],[65382,65470],
+   [65474,65479],[65482,65487],[65490,65495],[65498,65500],[65504,65505],
+   [65509,65510],[65529,65531]]).
+
+
          /*******************************
          *      EXCEPTION HANDLING      *
          *******************************/
@@ -4354,80 +4772,125 @@ dir_per_line([H|T]) -->
 % ===
 % throwme(+LookupPred,+LookupTerm)
 %
-% Predicate called to throw an exception.
+% Predicate called to construct an exception term and throw it. Information
+% about how to construct the actual exception is found by performing a lookup
+% based on the key formed by the pair (LookupPred,LookupTerm).
 %
 % LookupPred :
-%    What predicate is throwing; this is an atom (a keyword), not a
+%    What predicate is throwing; this is an atom (a keyword) generally shaped
+%    after the actual predicate name of the throwing predicate. It is not a
 %    predicate indicator.
 %
 % LookupTerm :
-%    A term, possibly compound, that is both user-readable (but still
-%    abstract) as well as a way for passing values that can be inserted into
-%    the "formal" term, which will be inserted into the exception term,
-%    which will be thrown.
+%    A term, possibly compound, that describes the problem somehow. It is both
+%    programmer-interpretable (but still abstract) as well as a way of passing
+%    values that can be inserted into the "Formal" part.
+%
+% Example: throwme(setter_atomic,nonzero(A))
 % ===
 
 throwme(LookupPred,LookupTerm) :-
-   findall([Location,Formal,MsgTxt],exc_desc(LookupPred,LookupTerm,Location,Formal,MsgTxt),Bag),
+   findall([Location,Formal,Msg],exc_desc(LookupPred,LookupTerm,Location,Formal,Msg),Bag),
    length(Bag,BagLength),
-   throwme_h1(BagLength,Bag,LookupPred,LookupTerm).
+   throwme_help(BagLength,Bag,LookupPred,LookupTerm).
 
-throwme_h1(0,_,LookupPred,LookupTerm) :-
-   with_output_to(atom(Txt),format("Did not find an exception descriptor for LookupPred = ~q, LookupTerm = ~q", [LookupPred,LookupTerm])),
-   throw(error(programming_error,context(_,Txt))). % resolutely non-ISO standard
+% Helper invoked if exactly 1 applicable "exception descriptor" could be found.
+% Throw the corresponding exception!
+% This is the first clause in line. If there is no match on arg1, the catchall
+% fallback is used instead.
+% The constructed error term is "quasi ISO-standard" because its structure is
+% "error(Formal,Context)" -- but there is not guarantee that the "Formal" term
+% is any of the ISO-listed allowed "Formal" term (in fact, it generally is not).
+% The "Context" (about which the ISO standard says nothing, leaving it to be
+% "implementation-defined") is structured according to SWI-Prolog conventions:
+% "context(Location,Msg)" where "Location", if left fresh, can be filled with
+% a stack trace on the toplevel or by a catching catch_with_backtrace/3. It
+% is, however, often filled with the predicate indicator of the throwing
+% predicate. The "Msg" should be a stringy thing to printed out, i.e. a
+% human-readable explainer that is either an atom or a string.
+% - Is there a requirement that "Msg" be forced to an atom?
+% ---
 
-throwme_h1(1,[[Location,Formal,MsgTxt]],_,_) :-
-   throw(error(Formal,context(Location,MsgTxt))).
+throwme_help(1,[[Location,Formal,Msg]],_,_) :-
+   throw(error(Formal,context(Location,Msg))).
 
-throwme_h1(Count,_,LookupPred,LookupTerm) :-
-   with_output_to(atom(Txt),format("Found ~d exception descriptors for LookupPred = ~q, LookupTerm = ~q", [Count,LookupPred,LookupTerm])),
-   throw(error(programming_error,context(_,Txt))). % resolutely non-ISO standard
+% ---
+% Helper invoked if not exactly 1 applicable "exception descriptor" could be found.
+% That means the set of exception descriptors is incomplete/ambiguous or the lookup
+% query is wrong. Throws a quasi-ISO-standard exception following the format
+% error(_,_) but with the formal term the non-ISO atom 'programming_error'.
+% - Note that "Msg" is an atom, not a string (is that ok? it should probably be
+%   a String, at least in SWI-Prolog)
+% - Note that the second argument for error(_,_) follows SWI-Prolog conventions
+%   and with its first position fresh, may be filled with a backtrace.
+% ---
+
+throwme_help(Count,_,LookupPred,LookupTerm) :-
+   Count \== 1,
+   with_output_to(
+      atom(Msg),
+      format("Instead of 1, found ~d exception descriptors for LookupPred = ~q, LookupTerm = ~q",
+         [Count,LookupPred,LookupTerm])),
+   throw(error(programming_error,context(_,Msg))).
 
 % ===
-% exc_desc(+LookupPred,+LookupTerm,?Location,?Formal,?MsgTxt)
+% exc_desc(+LookupPred,+LookupTerm,?Location,?Formal,?Msg)
 % ===
 % Descriptors for exceptions.
 %
-% The first two arguments are used for lookup.
-%
-% LookupPred :
-%    What predicate is throwing; this is an atom (a keyword), not a
-%    predicate indicator.
-%
-% LookupTerm :
-%    A term, possibly compound, that is both user-readable (but still
-%    abstract) as well as a way for passing values that can be inserted into
-%    the "formal" term, which will be inserted into the exception term,
-%    which will be thrown.
+% The first two arguments are used for lookup. See throwme/2 for an explainer.
 %
 % The three last arguments are output values which are use to construct
-% the exception term that will be thrown.
+% the exception term that is suppoed to be thrown by the caller.
 %
-% Note in particular that "Location" is a predicate indicator, and
-% it provides lesst information than the "LookupPred" key. For example,
-% if an exception is thrown from a specific clause that deals with static
-% fields, the "LookupPred" may be a clause-specific key, but the
-% "Location" will be the generic predicate indicator of the predicate:
+% If "Location" is left a freshvar, it can be instantiated to a backtrack if
+% the exception reaches the Prolog Toplevel or is caught by
+% catch_with_backtrace/3.
+%
+% Otherwise, "Location" should be a predicate indicator or something similar.
+%
+% Example:
 %
 % exc_desc(jpl_call_static,no_such_method(M),
 %          jpl_call/4,
 %          existence_error(method,M),
 %          'some text')
 %
-% The "MsgTxt" is a user-readable message. For now, it is not constructed
-% (using format/3 calls) inside of exc_desc/5, nor is internationalization
-% supported for that matter. In some cases, the "MsgTxt" is passed in
-% inside "LookupTerm" and unification-picked out of there into arg 5.
+% exc_desc(jpl_call_static,no_such_method(M),
+%          _,
+%          existence_error(method,M),
+%          'some text')
 %
-% The "Formal" is exactly the "formal" term that will used in the exception
-% term, and it is built by just unification doing pick/put with the
-% LookupTerm. Constructing a "formal" term is not an exact science: The provided
-% information is shoehorned into "formal" terms that _look_ like ISO standard
-% formal terms but are not really because they do not necessarily have the
-% intended semantics and definitely do not carry the allowed atoms listed
-% in the ISO standard. Unfortunately ISO standard exceptions are far too
-% rigid in specification.
+% The "Msg" is a user-readable message. For now, it is not dynamically
+% constructed (i.e. using format/3 calls) inside of exc_desc/5, nor is
+% internationalization supported for that matter. In some cases, the "Msg"
+% has been created by caller and is passed in inside "LookupTerm", from where
+% it is unification-picked-out-of-there into arg 5.
+%
+% The "Formal" is exactly the "formal term" that will used in the "exception
+% term", and it is built by unification doing pick/put against "LookupTerm".
+% It may or may not be ISO-Standard.
+%
+% Note that the fact that we adhere to ISO standard atoms instead of defining
+% our own for JPL has the advantage that exception-printing handlers on the
+% toplevel still work but the generated text is confusing: for example the
+% exception-generating handler receives a "type_error" (which is meant to
+% indicate a type problem inside a Prolog program, but here is also used to
+% indicate a type problem of a very different nature, e.g. the caller wants
+% to instantiate a Java interface) and the argument passed in the formal is
+% the name of the Java class as an atom. Then the printing handler will say
+% this: "there is a problem because this is an atom: 'foo.bar.Interface'" and
+% only by reading the cleartext message will the actual problem be revealed:
+% "you tried to instantiate an interface".
 % ---
+
+safe_type_to_classname(Type,CN) :-
+   catch(
+      (jpl_type_to_classname(Type,CN)
+       -> true
+       ;  with_output_to(atom(CN),format("~q",[Type]))),
+      _DontCareCatcher,
+      CN='???').
 
 exc_desc(jpl_new,x_is_var,
          jpl_new/3,
@@ -4461,15 +4924,15 @@ exc_desc(jpl_new_class,params_is_not_list(Params),
          type_error(list,Params),
          '2nd arg must be a proper list of valid parameters for a constructor').
 
-exc_desc(jpl_new_class,class_is_interface(C),
+exc_desc(jpl_new_class,class_is_interface(Type),
          jpl_new/3,
-         type_error(concrete_class,C),
-         'cannot create instance of an interface').
+         type_error(concrete_class,CN),
+         'cannot create instance of an interface') :- safe_type_to_classname(Type,CN).
 
-exc_desc(jpl_new_class,class_without_constructor(Co),
+exc_desc(jpl_new_class,class_without_constructor(Type,Arity),
          jpl_new/3,
-         existence_error(constructor,Co),
-         'no constructor found with the corresponding quantity of parameters').
+         existence_error(constructor,CN/Arity),
+         'no constructor found with the corresponding quantity of parameters') :- safe_type_to_classname(Type,CN).
 
 exc_desc(jpl_new_class,acyclic(X,Msg),
          jpl_new/3,
@@ -4496,10 +4959,10 @@ exc_desc(jpl_new_class,constructor_multimatch(Params),
          type_error(constructor_params,Params),
          'more than one most-specific matching constructor (shouldn''t happen)').
 
-exc_desc(jpl_new_class,class_is_abstract(C),
+exc_desc(jpl_new_class,class_is_abstract(Type),
          jpl_new/3,
-         type_error(concrete_class,C),
-         'cannot create instance of an abstract class').
+         type_error(concrete_class,CN),
+         'cannot create instance of an abstract class') :- safe_type_to_classname(Type,CN).
 
 % ---
 
@@ -4529,8 +4992,11 @@ exc_desc(jpl_new_primitive,params_is_var,
 % the call to this is commented out in jpl.pl
 exc_desc(jpl_new_primitive,params_is_bad(Params),
          jpl_new/3,
-         domain_error(constructor_args,Params),
-         'when constructing a new instance of a primitive type, 2nd arg must either be an empty list (indicating that the default value of that type is required) or a list containing exactly one representation of a suitable value)').
+         domain_error(constructor_args,Params),Msg) :-
+   atomic_list_concat([
+         'when constructing a new instance of a primitive type, 2nd arg must either be an ',
+         'empty list (indicating that the default value of that type is required) or a ',
+         'list containing exactly one representation of a suitable value'],Msg).
 
 % ---
 
@@ -4642,10 +5108,10 @@ exc_desc(jpl_get,arg1_is_var,
          instantiation_error,
          '1st arg must be bound to an object, classname, descriptor or type').
 
-exc_desc(jpl_get,named_class_not_found(Classname),
+exc_desc(jpl_get,named_class_not_found(Type),
 	 jpl_get/3,
-         existence_error(class,Classname),
-         'the named class cannot be found').
+         existence_error(class,CN),
+         'the named class cannot be found') :- safe_type_to_classname(Type,CN).
 
 exc_desc(jpl_get,arg1_is_bad(X),
 	 jpl_get/3,
@@ -4765,10 +5231,10 @@ exc_desc(jpl_set,classname_does_not_resolve(X),
 	 existence_error(class,X),
          'the named class cannot be found').
 
-exc_desc(jpl_set,class_not_found(Classname),
+exc_desc(jpl_set,named_class_not_found(Type),
          jpl_set/3,
-	 existence_error(class,Classname),
-         'the class cannot be found').
+	 existence_error(class,CN),
+         'the named class cannot be found') :- safe_type_to_classname(Type,CN).
 
 exc_desc(jpl_set,acyclic(X,Msg),
          jpl_set/3,
@@ -4802,10 +5268,10 @@ exc_desc(jpl_set_instance_class,field_is_final(Fname),
 	 permission_error(modify,final_field,Fname),
 	 'cannot assign a value to a final field (actually you could but I''ve decided not to let you)').
 
-exc_desc(jpl_set_instance_class,incompatible_value(NNf,V),
+exc_desc(jpl_set_instance_class,incompatible_value(Type,V),
 	 jpl_set/3,
-	 type_error(NNf,V),
-	 'the value is not assignable to the named field of the class').
+	 type_error(CN,V),
+	 'the value is not assignable to the named field of the class') :- safe_type_to_classname(Type,CN).
 
 exc_desc(jpl_set_instance_class,arg3_is_bad(V),
 	 jpl_set/3,
@@ -4901,10 +5367,10 @@ exc_desc(jpl_set_static,cannot_assign_final_field(Fname),
          permission_error(modify,final_field,Fname),
 	 'cannot assign a value to a final field').
 
-exc_desc(jpl_set_static,value_not_assignable(NNf,V),
+exc_desc(jpl_set_static,value_not_assignable(Type,V),
          jpl_set/3,
-         type_error(NNf,V),
-	 'the value is not assignable to the named field of the class').
+         type_error(CN,V),
+	 'the value is not assignable to the named field of the class') :- safe_type_to_classname(Type,CN).
 
 exc_desc(jpl_set_static,arg3_is_bad(field_value,V),
          jpl_set/3,
