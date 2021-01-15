@@ -10,7 +10,7 @@
 	<!-- ######################### PROJECT INFO ######################### -->
 	<groupId>jpl</groupId>
 	<artifactId>jpl</artifactId>
-	<version>8.3.16</version>
+	<version>8.3.17</version>
 
 	<name>jpl</name>
 	<description>A Java Interface to Prolog</description>
